@@ -1,0 +1,150 @@
+---
+title: 'Machine Learning 2019: Feature Selection'
+author: "Peter Stella"
+date: "October 24, 2019"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Feature Selection 
+
+In machine learning, feature selection is the process of choosing variables that are useful in predicting the response variable. Selecting the right features in your data can mean the difference between mediocre performance with long training times and great performance with short training times that are less computationally intensive. 
+
+Often, data can contain attributes that are highly correlated with each other or not useful in helping predict our response variable. Many methods perform better if such variables are removed. Feature selection is usually imporant to implement during the data pre-processing steps of machine learning. 
+
+
+```{r load relevant libraries, include=FALSE}
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(mlbench)
+library(glmnet)
+library(dplyr)
+library(corrplot)
+library(MASS)
+library(tree)
+library(ISLR)
+library(gbm)
+library(ggplot2)
+```
+
+## The Breast Cancer Dataset
+699 Observations, 11 variables
+Predictor Variable: Class- benign or malignant 
+
+```{r load Breast Cancer dataset}
+data(BreastCancer)
+head(BreastCancer)
+dim(BreastCancer)
+summary(BreastCancer$Class)
+```
+
+
+
+
+## Homework
+
+1. Compare the most important features from at least 2 different classes of feature selection methods covered in this tutorial with any reasonable machine learning dataset from mlbench. Do these feature selection methods provide similar results? 
+
+1.1 Correlation matrix on bosting housing data
+
+```{r}
+data("BostonHousing2")
+#coerce to numeric, place dependent variables, town names to left hand side for easy manipulation. 
+BH2num <- BostonHousing2 %>% mutate(tract = as.numeric(tract), chas = as.numeric(chas), rad=as.numeric(rad), tax=as.numeric(tax))
+BH2num <- BH2num %>% dplyr::select(cmedv, medv, town, everything()) 
+```
+
+
+```{r}
+
+#calculate correlation matrix using pearson correlation 
+correlation_matrix = cor(BH2num[,4:19])
+corrplot(correlation_matrix, order = "hclust")
+highly_correlatedp <- colnames(BH2num[])[findCorrelation(correlation_matrix, cutoff = 0.7, verbose = TRUE)]
+highly_correlatedp
+
+```
+
+1.2
+Lasso: 
+
+Covert to matrix. 
+
+```{r}
+BHmat <- as.matrix(BH2num[,4:19])
+BHmatval <- as.matrix(BH2num[,1])
+```
+
+Since we have a continuous dependent variable in the housing data we will need to a linear regression model rather than a logistic regression model, so we change family type to gaussian. We will also use MSE as our performance measure rather than AUC as above
+
+```{r}
+#fit Lasso model 
+bhlasso <- cv.glmnet(BHmat, BHmatval, family='gaussian', alpha=1, type.measure='mse',parallel=TRUE, standardize=TRUE)
+
+plot(bhlasso)
+
+cat('Min Lambda: ', bhlasso$lambda.min, '\n 1Sd Lambda: ', bhlasso$lambda.1se)
+df_coef <- round(as.matrix(coef(bhlasso, s=bhlasso$lambda.min)), 2)
+df_coef
+```
+
+1.3
+
+Random forest
+
+
+```{r}
+str(BH2num)
+```
+
+
+```{r importance}
+
+train_size <- floor(0.75 * nrow(BH2num))
+train_pos <- sample(seq_len(nrow(BH2num)), size = train_size)
+
+rftrain <- BH2num[train_pos, ]
+rftest <- BH2num[-train_pos, ]
+
+#fit a model
+rfmodel = randomForest(cmedv ~ tract + lon +lat + crim +  zn + indus + chas + nox +rm + age + dis + rad +tax + ptratio + b + lstat, data=rftrain,  importance = TRUE, oob.times = 15, confusion = TRUE)
+
+importance(rfmodel)
+rfmodel
+rfpredict <- predict(rfmodel, rftest)
+summary(rfpredict)
+
+
+```
+
+```{r}
+rferror <- (rfpredict-rftest$cmedv)
+rferrorsum <- data.frame(rftest$cmedv, rfpredict, rferror)
+mserror <- mean(rferror^2)
+mserror
+```
+
+
+
+2. Attempt a feature selection method not covered in this tutorial (backward elimination, forward propogation, etc.)
+
+2.1 Forward selection
+
+Remove medv and town information 
+```{r}
+BH2num2 <- BH2num %>% dplyr::select(-medv,-town)
+str(BH2num2)
+```
+
+```{r}
+modelf1 <- lm(cmedv ~ ., data=BH2num2)
+modelf2 <- lm(cmedv ~ 1, data=BH2num2)
+step <- stepAIC(modelf2, direction="forward", scope = list(upper=modelf1, lower= modelf2))
+step$anova
+```
