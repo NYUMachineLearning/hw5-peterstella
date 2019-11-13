@@ -1,0 +1,183 @@
+---
+title: 'Machine Learning 2019: Tree-Based Methods'
+author: 'Peter Stella'
+date: "10/28/2019"
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Tree-Based Methods 
+
+Decision tree is a type of supervised learning algorithm that can be used in both regression and classification problems. Tree-based methods works for both categorical and continuous input and output variables.
+
+```{r load relevant libraries, include=FALSE}
+library(tidyverse)
+library(ISLR)
+library(tree)
+library(randomForest)
+library(MASS)
+library(gbm)
+library(ggplot2)
+library(mlbench)
+library(pROC)
+```
+
+```{r The Carseats Dataset}
+data("Carseats")
+carseats = Carseats
+head(carseats)
+
+#convert quantitative variable Sales into a binary response 
+High = ifelse(carseats$Sales<=8, "No", "Yes")
+carseats = data.frame(carseats, High)
+
+head(carseats)
+```
+
+
+## Bagging: Random Forest 
+
+Bagging involves creating multiple copies of the original training dataset using the bootstrap, fitting a separate decision tree to each copy, and then combining all of the trees in order to create a single predictive model. Each tree is built on a bootstrapped dataset, independent of the other trees.
+
+Random Forest: Each time a split in a tree is considered, a random sample of m predictors is chosen as split candidates from the full set of p predictors. The split is allowed to use only one of those m predictors.
+
+
+```{r }
+
+
+```
+
+## Boosting 
+
+Boosting is another approach to improve the predictions resulting from a decision tree. Trees are grown sequentially: each tree is grown using information from previously grown trees. Each tree is fitted on a modified version of the original dataset.
+
+
+
+
+## Homework
+
+1. Attempt a regression tree-based method (not covered in this tutorial) on a reasonable dataset of your choice. Explain the results. 
+
+Repeating the above carseat example, but with a continues dependent variable (sales)
+
+```{r}
+#set seed to make results reproducible 
+set.seed(1)
+
+#split data into train and test subset (250 and 150 respectively)
+traincar <- sample(1:nrow(carseats), 250)
+
+#Fit train subset of data to model 
+treecar <- tree(Sales~., Carseats, subset = traincar)
+summary(treecar)
+plot(treecar)
+text(treecar, pretty=0)
+carpred <-  predict(treecar, Carseats[-traincar,])
+
+```
+
+```{r}
+cartest <- Carseats[-traincar,]
+cartest <- cartest$Sales
+cartest <- data.frame(carpred, cartest)
+
+```
+
+```{r}
+ggplot(data=cartest, aes(x=carpred, y=cartest))+
+geom_point()+ geom_abline()+xlim(0,15)
+
+```
+
+2. Attempt both a bagging and boosting method on a reasonable dataset of your choice. Explain the results.
+
+```{r}
+data("PimaIndiansDiabetes")
+
+```
+
+```{r}
+str(PimaIndiansDiabetes)
+```
+
+
+```{r}
+pima <- PimaIndiansDiabetes %>% mutate(diabetes=ifelse(diabetes=="pos",1,0))
+pnumtrain = sample(1:nrow(PimaIndiansDiabetes), 600)
+```
+
+
+```{r Random Forest}
+
+ptrain = sample(1:nrow(PimaIndiansDiabetes), 600)
+
+#fit training subset of data to model 
+rfpima = randomForest(diabetes~., data = PimaIndiansDiabetes, subset = ptrain)
+rfpima
+
+poob.err = double(8)
+ptest.err = double(8)
+
+#In a loop of mtry from 1 to 8, you first fit the randomForest to the train dataset
+for(mtry in 1:8){
+  pfit = randomForest(diabetes~., data = PimaIndiansDiabetes, subset = ptrain, mtry=mtry, ntree = 350)
+  poob.err[mtry] = pfit$err.rate[350] ##extract error rate 
+  ppred = predict(pfit, PimaIndiansDiabetes[-ptrain,]) #predict on test dataset
+  ptest.err[mtry] = with(PimaIndiansDiabetes[-ptrain,], (1-mean(ppred==diabetes))) #compute test error
+}
+
+```
+
+
+
+
+```{r}
+pplot <- data.frame(poob.err,ptest.err) %>% add_rownames()
+ggplot()+
+geom_line(data=pplot, aes(x=rowname, y=poob.err) ,color="blue", group=1)+
+geom_line(data=pplot, aes(x=rowname, y=ptest.err), color="red",group=1)+
+ylim(0,0.3)+
+xlab("mtry Blue= OOB, Red = Test")+
+ylab("Error Rate")
+
+```
+
+OOB error drops slightly with increased number of variables use for splitting up to 4/5, while test error remains basically stable, with an unexpected drop at 8, which I cannot explain well. Admittedly, I am using a very primitive expression of error (misclassification rate), rather than a more complex one such as AUC. 
+
+
+
+
+```{r}
+#Gradient Boosting Model
+pboost = gbm(diabetes~., data = pima[pnumtrain,], distribution = "bernoulli", n.trees = 10000, shrinkage = 0.01, interaction.depth = 4)
+
+#Variable Importance Plot
+summary(pboost)
+
+```
+
+```{r}
+n.trees = seq(from = 1, to = 10000, by = 10)
+predmat = predict(pboost, newdata = pima[-pnumtrain,], n.trees = n.trees, type="response")
+predmat <- round(predmat,digits = 0)
+dim(predmat)
+```
+
+```{r}
+boost.err = with(pima[-pnumtrain,], apply( (1-(predmat == diabetes)), 2, mean) )
+```
+
+```{r}
+boosterrror <- as.data.frame(boost.err) %>% add_rownames()
+boosterrror$rowname <- as.numeric(boosterrror$rowname)
+ggplot(data = boosterrror, aes(x=rowname, y=boost.err))+
+geom_jitter()+
+ylim(0.2,0.5)+
+xlab("Number of Trees")+
+ylab("Error Rate")
+```
+
+As expected, error drops quickly as the number or tree increases to a reasonable number, and then worsens as the the number of trees increases due to overfitting, before reaching an asymptote. 
